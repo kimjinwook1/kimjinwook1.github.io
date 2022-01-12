@@ -1,1 +1,3 @@
-# kimjinwook1.github.io
+# KIMJINWOOK
+
+2022/01/12 TIL BLOG START!
