@@ -37,7 +37,7 @@ minute: 1
   - 컬렉션을 페치 조인하면 일대다 조인이 발생하므로 데이터가 예측할 수 없이 증가한다.
   - 일대다에서 일(1)을 기준으로 페이징을 하는 것이 목적이다. 그런데 데이터는 다(N)를 기준으로 row가 생성된다.
   - Order를 기준으로 페이징하고 싶은데, 다(N)인 OrderItem을 조인하면 OrderItem이 기준이 되어버린다.
-- 이 경우 하이버네이트는 경고 로그를 남기고 모든 DB 데이터를 읽어서 메모리에서 페이지을 시도한다. -> 최악의 경우 장애로 이어질 수 있다.
+- 이 경우 하이버네이트는 경고 로그를 남기고 모든 DB 데이터를 읽어서 메모리에서 페이징을 시도한다. -> 최악의 경우 장애로 이어질 수 있다.
 
 ### 한계 돌파
 
@@ -58,7 +58,7 @@ minute: 1
 
 - 페치 조인 방식과 비교해서 쿼리 호출 수가 약간 증가하지만, DB 데이터 전송량이 감소한다.
 
-- 컬렉션 페치조인은 페이징이 불가능 하지만 이 방법은 페이징이 가능하다.
+- 컬렉션 페치조인은 페이징이 불가능 하지만 **이 방법은 페이징이 가능하다.**
 
 ### **결론**
 
@@ -70,11 +70,113 @@ minute: 1
 
   일단 100으로 설정한 후 점차 늘려나가면서 성능 테스트를 해보는 것이 좋다.
 
+```java
+@GetMapping("/api/v1/orders")
+public List<Order> ordersV1() {
+    List<Order> all = orderRepository.findAllByString(new OrderSearch());
+
+    for (Order order : all) {
+        order.getMember().getName();
+        order.getDelivery().getAddress();
+
+        List<OrderItem> orderItems = order.getOrderItems();
+        orderItems.forEach(o -> o.getItem().getName());
+    }
+    return all;
+}
+```
 
 
- 
 
 
+
+```java
+@GetMapping("/api/v2/orders")
+public List<OrderDto> ordersV2() {
+    List<Order> orders = orderRepository.findAllByString(new OrderSearch());
+
+    List<OrderDto> result = orders.stream()
+            .map(o -> new OrderDto(o))
+            .collect(toList());
+
+    return result;
+}
+```
+
+
+
+
+
+```java
+@GetMapping("/api/v3/orders")
+public List<jpabook.jpashop.service.query.OrderDto> ordersV3() {
+    return orderQueryService.ordersV3();
+}
+
+public List<OrderDto> ordersV3() {
+        List<Order> orders = orderRepository.finAllWithItem();
+
+        List<OrderDto> result = orders.stream()
+                .map(o -> new OrderDto(o))
+                .collect(toList());
+
+        return result;
+    }
+
+ public List<Order> finAllWithItem() {
+        return em.createQuery(
+                        "select distinct o from Order o" +
+                                " join fetch o.member m" +
+                                " join fetch o.delivery d" +
+                                " join fetch o.orderItems oi" +
+                                " join fetch oi.item i", Order.class)
+                .getResultList();
+
+    }
+```
+
+
+
+
+
+```java
+@GetMapping("/api/v3.1/orders") // 컬렉션은 페치조인 X -> 대신에 지연로딩
+public List<OrderDto> ordersV3_page(
+        @RequestParam(value = "offset", defaultValue = "0") int offset,
+        @RequestParam(value = "limit", defaultValue = "100") int limit
+) {
+    List<Order> orders = orderRepository.findWithMemberDelivery(offset, limit);
+
+    List<OrderDto> result = orders.stream()
+            .map(o -> new OrderDto(o))
+            .collect(toList());
+
+    return result;
+}
+
+  public List<Order> findWithMemberDelivery(int offset, int limit) {
+
+        return em.createQuery(
+                        "select o from Order o" +
+                                " join fetch o.member m" +
+                                " join fetch o.delivery d", Order.class)
+                .setFirstResult(offset)
+                .setMaxResults(limit)
+                .getResultList();
+    }
+```
+
+
+
+### 엔티티 조회
+
+- 엔티티를 조회해서 그대로 반환: V1
+- 엔티티 조회 후 DTO 반환: V2
+- 페치 조인으로 쿼리 수 최적화: V3
+- 컬렉션 페이징과 한계 돌파: V3.1
+  - 컬렉션은 페치 조인시 페이징이 불가능
+  - ToOne 관계는 페치 조인으로 쿼리 수 최적화
+  - 컬렉션은 페치 조인 대신에 지연 로딩을 유지하고, `hibernate.default_batce_fetch_size`,`@BatchSize`로 최적화
 
 
 
